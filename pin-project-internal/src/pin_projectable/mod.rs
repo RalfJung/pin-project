@@ -60,7 +60,7 @@ pub(super) fn pin_project(input: TokenStream) -> Result<TokenStream> {
                         let attr = attrs.remove(pos);
                         let args = match attr.parse_meta()? {
                             Meta::List(l) => l.nested.into_token_stream(),
-                            Meta::Word(_) => TokenStream::new(),
+                            Meta::Path(_) => TokenStream::new(),
                             _ => return Err(error!(span!(attr), "invalid arguments"))
                         };
 
@@ -72,7 +72,7 @@ pub(super) fn pin_project(input: TokenStream) -> Result<TokenStream> {
                     return Err(error!(item, "cannot declare multiple types within pinned module"))
                 }
             },
-            Item::Fn(ref mut fn_) => {
+            Item::Fn(fn_) => {
                 if fn_.attrs.find_remove(PINNED_DROP) {
                     if found_pinned_drop.is_none() {
                         found_pinned_drop = Some(fn_.clone());
@@ -104,18 +104,16 @@ pub(super) fn attribute(args: TokenStream, input: TokenStream) -> Result<TokenSt
 }
 
 fn ensure_not_packed(attrs: &[Attribute]) -> Result<()> {
-    for attr in attrs {
-        if let Ok(meta) = attr.parse_meta() {
-            if let Meta::List(l) = meta {
-                if l.ident == "repr" {
-                    for repr in l.nested.iter() {
-                        if let NestedMeta::Meta(Meta::Word(w)) = repr {
-                            if w == "packed" {
-                                return Err(error!(
-                                    w,
-                                    "pin_projectable may not be used on #[repr(packed)] types"
-                                ));
-                            }
+    for meta in attrs.iter().filter_map(|attr| attr.parse_meta().ok()) {
+        if let Meta::List(l) = meta {
+            if l.path.is_ident("repr") {
+                for repr in l.nested.iter() {
+                    if let NestedMeta::Meta(Meta::Path(p)) = repr {
+                        if p.is_ident("packed") {
+                            return Err(error!(
+                                p,
+                                "pin_projectable may not be used on #[repr(packed)] types"
+                            ));
                         }
                     }
                 }
@@ -147,7 +145,7 @@ impl ImplDrop {
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
 
         if let Some(fn_) = self.pinned_drop {
-            let fn_name = fn_.ident.clone();
+            let fn_name = fn_.sig.ident.clone();
             quote! {
                 impl #impl_generics ::core::ops::Drop for #ident #ty_generics #where_clause {
                     fn drop(&mut self) {
